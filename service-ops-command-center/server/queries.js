@@ -1,0 +1,29 @@
+export const queries = {
+  flexTime: `
+SELECT EXTRACT(YEAR FROM CLM_RPR_PROC_DT) AS Reporting_Year, EXTRACT(MONTH FROM CLM_RPR_PROC_DT) AS Reporting_Month_Num,
+ROUND(SUM(CAST(WIAA04_LBR_HR_R AS FLOAT64)), 2) AS Grand_Total_Labor_Hours,
+ROUND(SUM(CASE WHEN STARTS_WITH(WIAA04_LABOR_OP_R, 'AP') THEN CAST(WIAA04_LBR_HR_R AS FLOAT64) WHEN (STARTS_WITH(WIAA04_LABOR_OP_R, 'AD') AND WIAA04_LABOR_OP_R != 'ADD') THEN CAST(WIAA04_LBR_HR_R AS FLOAT64) WHEN STARTS_WITH(WIAA04_LABOR_OP_R, 'MT') THEN CAST(WIAA04_LBR_HR_R AS FLOAT64) ELSE 0 END), 2) AS Grand_Total_Flex_Time_Hours,
+ROUND(SUM(CASE WHEN STARTS_WITH(WIAA04_LABOR_OP_R, 'MT') THEN CAST(WIAA04_LBR_HR_R AS FLOAT64) ELSE 0 END), 2) AS Grand_Total_MT_Hours,
+ROUND(SUM(CASE WHEN STARTS_WITH(WIAA04_LABOR_OP_R, 'AP') THEN CAST(WIAA04_LBR_HR_R AS FLOAT64) ELSE 0 END), 2) AS Grand_Total_AP_Hours,
+ROUND(SUM(CASE WHEN (STARTS_WITH(WIAA04_LABOR_OP_R, 'AD') AND WIAA04_LABOR_OP_R != 'ADD') THEN CAST(WIAA04_LBR_HR_R AS FLOAT64) ELSE 0 END), 2) AS Grand_Total_AD_Hours
+FROM \`ford-ee0e6c9587d8995de3150ffe.LaborHourDashboardTables.AllClaimsWiseWarrantyDataAndLaborHoursAndFlags\`
+WHERE CLM_RPR_PROC_DT BETWEEN "2023-01-01" AND "2026-12-31" AND PAACCT_CD != "67803" AND Total_LaborHours IS NOT NULL
+GROUP BY 1, 2 ORDER BY Reporting_Year ASC, Reporting_Month_Num ASC`,
+  roDuration: `
+SELECT RO_Open_dt AS RO_Date, EXTRACT(YEAR FROM RO_Open_dt) AS RO_Year, EXTRACT(MONTH FROM RO_Open_dt) AS RO_Month_Num, FORMAT_DATE('%b', RO_Open_dt) AS RO_Month_Name, DATE_DIFF(RO_Close_dt, RO_Open_dt, DAY) AS RO_Duration_Days, ro_contains_powertrain_part
+FROM \`ford-735d6478b8ce5e44e47bc620.Dashboard_UDB_Source.UDB_Flag_Table\`
+WHERE RO_Open_dt >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 YEAR) AND RO_Close_dt IS NOT NULL`,
+  tech: `
+WITH end_point_tech AS ( SELECT cy_mo_cd, count(distinct XYZ.techn_stars_id) AS end_point_tech FROM ( SELECT distinct B.techn_stars_id, B.cy_mo_cd, B.paacct_cd FROM \`prj-dfad-1242-uapd-p-1242.bq_dm_vsr_s360_fdp_dmc_vw.vsrstr001_srvc_techn_crtfc_vw\` AS B WHERE paacct_cd IS NOT NULL AND dlr_srvc_algn_lvl_1_cd IS NOT NULL AND paacct_cd <> '05569' AND SUBSTR(cy_mo_cd, 1, 4) BETWEEN '2021' AND '2026' AND B.techn_dlr_pos_end_in = 'N' AND trim(B.techn_dlr_chng_cd) <> 'Old' AND B.techn_mrcnt_job_pos_in = 'Y' ) AS XYZ GROUP BY cy_mo_cd ),
+Current_uncertified_count AS ( SELECT cy_mo_cd, count(distinct XYZ.techn_stars_id) AS Current_uncertified_count FROM ( SELECT distinct B.techn_stars_id, B.cy_mo_cd, B.dlr_srvc_algn_lvl_1_cd FROM \`prj-dfad-1242-uapd-p-1242.bq_dm_vsr_s360_fdp_dmc_vw.vsrstr001_srvc_techn_crtfc_vw\` AS B WHERE paacct_cd IS NOT NULL AND dlr_srvc_algn_lvl_1_cd IS NOT NULL AND paacct_cd <> '05569' AND SUBSTR(cy_mo_cd, 1, 4) BETWEEN '2021' AND '2026' AND B.techn_dlr_pos_end_in = 'N' AND trim(B.techn_dlr_chng_cd) <> 'Old' AND B.techn_crtfd_in = 'N' AND B.snr_mstr_techn_in = 'N' AND B.mstr_techn_in = 'N' AND B.techn_mrcnt_job_pos_in = 'Y' ) AS XYZ GROUP BY cy_mo_cd ),
+n_current_tech_count_summarized_from_tech_table AS ( SELECT cy_mo_cd, COUNT(*) AS n_current_tech_count_summarized_from_tech_table FROM ( SELECT distinct techn_stars_id, paacct_cd, cy_mo_cd FROM \`prj-dfad-1242-uapd-p-1242.bq_dm_vsr_s360_fdp_dmc_vw.vsrstr001_srvc_techn_crtfc_vw\` AS B WHERE paacct_cd IS NOT NULL AND paacct_cd <> '05569' AND SUBSTR(cy_mo_cd, 1, 4) BETWEEN '2021' AND '2026' ) GROUP BY cy_mo_cd ),
+Defect_count_summarized_from_tech_table AS ( SELECT cy_mo_cd, count(XYZ.techn_stars_id) AS Defect_count_summarized_from_tech_table FROM ( SELECT distinct B.techn_stars_id, B.paacct_cd, B.cy_mo_cd FROM \`prj-dfad-1242-uapd-p-1242.bq_dm_vsr_s360_fdp_dmc_vw.vsrstr001_srvc_techn_crtfc_vw\` AS B WHERE paacct_cd IS NOT NULL AND SUBSTR(cy_mo_cd, 1, 4) BETWEEN '2021' AND '2026' AND B.techn_dlr_pos_end_in = 'Y' AND trim(B.techn_dlr_chng_cd) <> 'Old' ) AS XYZ GROUP BY cy_mo_cd )
+SELECT SUBSTR(n.cy_mo_cd, 1, 4) AS Tech_Year, CAST(SUBSTR(n.cy_mo_cd, 6, 2) AS INT64) AS Tech_Month_Num, e.end_point_tech, c.Current_uncertified_count, n.n_current_tech_count_summarized_from_tech_table, d.Defect_count_summarized_from_tech_table
+FROM n_current_tech_count_summarized_from_tech_table AS n LEFT JOIN end_point_tech AS e ON n.cy_mo_cd = e.cy_mo_cd LEFT JOIN Current_uncertified_count AS c ON n.cy_mo_cd = c.cy_mo_cd LEFT JOIN Defect_count_summarized_from_tech_table AS d ON n.cy_mo_cd = d.cy_mo_cd ORDER BY 1, 2`,
+  payType: `
+SELECT DATE_TRUNC(ro_open_dt, QUARTER) AS Quarter_Date, CONCAT('Q', EXTRACT(QUARTER FROM ro_open_dt), "'", SUBSTR(CAST(EXTRACT(YEAR FROM ro_open_dt) AS STRING), 3, 2)) AS Quarter_Year_Label, COUNT(DISTINCT CASE WHEN der_repair_c = 'C' THEN ro_header_key END) / 1000000 AS Customer_Paid_ROs, COUNT(DISTINCT CASE WHEN der_repair_c = 'F' THEN ro_header_key END) / 1000000 AS FSA_ROs, COUNT(DISTINCT CASE WHEN der_repair_c = 'W' THEN ro_header_key END) / 1000000 AS Warranty_ROs, COUNT(DISTINCT CASE WHEN der_repair_c IN ('I', 'S') THEN ro_header_key END) / 1000000 AS Internal_ROs, COUNT(DISTINCT ro_header_key) / 1000000 AS Total_RO_Count
+FROM \`ford-735d6478b8ce5e44e47bc620.Dashboard_UDB_Source.UDB_Flag_Table\` WHERE ro_open_dt BETWEEN '2020-01-01' AND CURRENT_DATE() AND billed_hrs > 0 GROUP BY 1, 2 ORDER BY Quarter_Date ASC`,
+  firft: `
+SELECT Region_cd, country_cd, DATE(EXTRACT(YEAR FROM Survey_Final_Posted_DateTime), EXTRACT(MONTH FROM Survey_Final_Posted_DateTime), 1) AS Month_Date, EXTRACT(YEAR FROM Survey_Final_Posted_DateTime) AS Survey_Year, EXTRACT(MONTH FROM Survey_Final_Posted_DateTime) AS Month_Number, FORMAT_DATE('%B', DATE(Survey_Final_Posted_DateTime)) AS Month_Name, SUM(CASE WHEN FIRTFT_Flag = 'Yes' THEN 1 ELSE 0 END) AS FIRTFT_Yes, COUNT(DISTINCT Survey_id) AS Survey_Count
+FROM \`ford-ffde869302a85158df27cb05.FIRFT_DATA_BUSINESS_EXP.FIRTFT_Survey_tbl\` WHERE EXTRACT(YEAR FROM Survey_Final_Posted_DateTime) BETWEEN 2024 AND 2026 GROUP BY 1,2,3,4,5,6 ORDER BY Month_Date`
+};
